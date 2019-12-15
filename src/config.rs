@@ -29,6 +29,7 @@ macro_rules! make_config {
         pub struct Config { inner: RwLock<Inner> }
 
         struct Inner {
+            shutdown_handle: Option<rocket::shutdown::ShutdownHandle>,
             templates: Handlebars,
             config: ConfigItems,
 
@@ -378,7 +379,6 @@ make_config! {
 
 fn validate_config(cfg: &ConfigItems) -> Result<(), Error> {
     let db_url = cfg.database_url.to_lowercase();
-    
     if cfg!(feature = "sqlite") && (db_url.starts_with("mysql:") || db_url.starts_with("postgresql:")) {
         err!("`DATABASE_URL` is meant for MySQL or Postgres, while this server is meant for SQLite")
     }
@@ -449,6 +449,7 @@ impl Config {
         Ok(Config {
             inner: RwLock::new(Inner {
                 templates: load_templates(&config.templates_folder),
+                shutdown_handle: None,
                 config,
                 _env,
                 _usr,
@@ -500,9 +501,8 @@ impl Config {
         let e: Vec<&str> = email.rsplitn(2, '@').collect();
         if e.len() != 2 || e[0].is_empty() || e[1].is_empty() {
             warn!("Failed to parse email address '{}'", email);
-            return false
+            return false;
         }
-        
         self.signups_domains_whitelist().split(',').any(|d| d == e[0])
     }
 
@@ -571,6 +571,14 @@ impl Config {
             let hb = &CONFIG.inner.read().unwrap().templates;
             hb.render(name, data).map_err(Into::into)
         }
+    }
+
+    pub fn set_shutdown_handle(&self, handle: rocket::shutdown::ShutdownHandle) {
+        self.inner.write().unwrap().shutdown_handle = Some(handle);
+    }
+
+    pub fn shutdown(&self) {
+        self.inner.read().unwrap().shutdown_handle.clone().map(|s| s.shutdown());
     }
 }
 
